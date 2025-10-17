@@ -1,33 +1,23 @@
 from fastapi import FastAPI, Request
-from supabase import create_client, Client
+import os, httpx
 from datetime import datetime
-import os
 
-# Initialize FastAPI
-app = FastAPI(title="Netzer Backend", version="1.0")
+app = FastAPI(title="Netzer Backend", version="1.1")
 
-# Connect to Supabase using environment variables (from Render)
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
 # -----------------------------------------------------
-# 1️⃣ Deposit Webhook - Record client deposits
+# POST /webhooks/stitch  →  insert deposit record
 # -----------------------------------------------------
 @app.post("/webhooks/stitch")
 async def handle_stitch_webhook(request: Request):
-    """
-    Handles incoming deposit webhooks (e.g., from Stitch).
-    Saves deposit info into the Supabase 'deposits' table.
-    """
     data = await request.json()
 
     client_id = data.get("client_id")
     amount_zar = data.get("amount_zar")
     stitch_txid = data.get("stitch_txid")
 
-    # Basic validation
     if not all([client_id, amount_zar, stitch_txid]):
         return {"ok": False, "error": "Missing required fields"}
 
@@ -40,31 +30,50 @@ async def handle_stitch_webhook(request: Request):
     }
 
     try:
-        response = supabase.table("deposits").insert(record).execute()
-        return {"ok": True, "data": response.data}
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{SUPABASE_URL}/rest/v1/deposits",
+                headers={
+                    "apikey": SUPABASE_KEY,
+                    "Authorization": f"Bearer {SUPABASE_KEY}",
+                    "Content-Type": "application/json",
+                    "Prefer": "return=representation"
+                },
+                json=record,
+                timeout=20
+            )
+        if resp.status_code < 300:
+            return {"ok": True, "data": resp.json()}
+        else:
+            return {"ok": False, "error": resp.text}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
 # -----------------------------------------------------
-# 2️⃣ Fetch All Deposits - For dashboard/admin view
+# GET /deposits  →  list all deposits
 # -----------------------------------------------------
 @app.get("/deposits")
-def list_deposits():
-    """
-    Returns all deposit records from Supabase.
-    """
+async def list_deposits():
     try:
-        response = supabase.table("deposits").select("*").order("timestamp", desc=True).execute()
-        return {"ok": True, "deposits": response.data}
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{SUPABASE_URL}/rest/v1/deposits?select=*",
+                headers={
+                    "apikey": SUPABASE_KEY,
+                    "Authorization": f"Bearer {SUPABASE_KEY}"
+                },
+                timeout=20
+            )
+        if resp.status_code < 300:
+            return {"ok": True, "deposits": resp.json()}
+        else:
+            return {"ok": False, "error": resp.text}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
 # -----------------------------------------------------
-# 3️⃣ Health Check - For uptime monitoring
+# Health check
 # -----------------------------------------------------
 @app.get("/")
 def health_check():
-    """
-    Basic health check endpoint.
-    """
-    return {"status": "Netzer backend is live and connected."}
+    return {"status": "Netzer backend live (HTTP Supabase mode)"}
