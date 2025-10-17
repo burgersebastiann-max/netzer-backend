@@ -10,21 +10,31 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 # -----------------------------------------------------
 # POST /webhooks/stitch  →  insert deposit record
 # -----------------------------------------------------
+from fastapi import FastAPI, Request
+from pydantic import BaseModel
+import os, httpx
+from datetime import datetime
+
+app = FastAPI(title="Netzer Backend", version="1.1")
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+# --- NEW: define the data model for request body ---
+class Deposit(BaseModel):
+    client_id: str
+    amount_zar: float
+    stitch_txid: str
+
+# -----------------------------------------------------
+# POST /webhooks/stitch  →  insert deposit record
+# -----------------------------------------------------
 @app.post("/webhooks/stitch")
-async def handle_stitch_webhook(request: Request):
-    data = await request.json()
-
-    client_id = data.get("client_id")
-    amount_zar = data.get("amount_zar")
-    stitch_txid = data.get("stitch_txid")
-
-    if not all([client_id, amount_zar, stitch_txid]):
-        return {"ok": False, "error": "Missing required fields"}
-
+async def handle_stitch_webhook(deposit: Deposit):
     record = {
-        "client_id": client_id,
-        "amount_zar": amount_zar,
-        "stitch_txid": stitch_txid,
+        "client_id": deposit.client_id,
+        "amount_zar": deposit.amount_zar,
+        "stitch_txid": deposit.stitch_txid,
         "timestamp": datetime.utcnow().isoformat(),
         "status": "completed"
     }
