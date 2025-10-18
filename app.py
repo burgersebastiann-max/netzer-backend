@@ -80,6 +80,65 @@ async def list_deposits():
             return {"ok": False, "error": resp.text}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+# -----------------------------------------------------
+# WITHDRAWALS
+# -----------------------------------------------------
+from pydantic import BaseModel
+
+class Withdrawal(BaseModel):
+    client_id: str
+    amount_zar: float
+    withdraw_txid: str
+
+@app.post("/webhooks/withdraw")
+async def handle_withdraw_request(withdraw: Withdrawal):
+    record = {
+        "client_id": withdraw.client_id,
+        "amount_zar": withdraw.amount_zar,
+        "withdraw_txid": withdraw.withdraw_txid,
+        "timestamp": datetime.utcnow().isoformat(),
+        "status": "pending"
+    }
+
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{SUPABASE_URL}/rest/v1/withdrawals",
+                headers={
+                    "apikey": SUPABASE_KEY,
+                    "Authorization": f"Bearer {SUPABASE_KEY}",
+                    "Content-Type": "application/json",
+                    "Prefer": "return=representation"
+                },
+                json=record,
+                timeout=20
+            )
+        if resp.status_code < 300:
+            return {"ok": True, "data": resp.json()}
+        else:
+            return {"ok": False, "error": resp.text}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@app.get("/withdrawals")
+async def list_withdrawals():
+    """List all withdrawal requests"""
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{SUPABASE_URL}/rest/v1/withdrawals?select=*",
+                headers={
+                    "apikey": SUPABASE_KEY,
+                    "Authorization": f"Bearer {SUPABASE_KEY}"
+                },
+                timeout=20
+            )
+        if resp.status_code < 300:
+            return {"ok": True, "withdrawals": resp.json()}
+        else:
+            return {"ok": False, "error": resp.text}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 # -----------------------------------------------------
 # Health check
