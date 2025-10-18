@@ -217,3 +217,78 @@ async def get_valr_deposits():
 def health_check():
     """Basic health check endpoint."""
     return {"status": "Netzer backend live (Supabase + VALR matching enabled)"}
+
+@app.post("/nav/calculate")
+async def calculate_nav(data: dict):
+    """
+    Calculate client NAV and record fee breakdown in Supabase.
+    ----------------------------------------------------------------
+    JSON Body:
+    {
+      "client_id": "string",            # required
+      "deposit_zar": float,             # required, client deposit
+      "zar_to_usdt_rate": float,        # required, exchange rate
+      "trade_fee_rate": float = 0.001,  # optional, default 0.1%
+      "withdrawal_fee_usdt": float = 1, # optional, default 1 USDT
+      "fund_model": "fee_adjusted"      # optional, 'buffer' or 'fee_adjusted'
+    }
+    ----------------------------------------------------------------
+    Returns NAV details + logs fee to Supabase.
+    """
+
+    try:
+        # --- Input parsing with defaults ---
+        cid: str = data["client_id"]
+        deposit_zar: float = float(data["deposit_zar"])
+        rate: float = float(data["zar_to_usdt_rate"])
+        trade_fee_rate: float = float(data.get("trade_fee_rate", 0.001))
+        withdrawal_fee_usdt: float = float(data.get("withdrawal_fee_usdt", 1))
+        model: str = data.get("fund_model", "fee_adjusted")
+
+        # --- Core NAV math ---
+        gross_usdt = deposit_zar / rate               # ZAR→USDT conversion
+        trade_fee_usdt = gross_usdt * trade_fee_rate  # trading fee in USDT
+
+        if model == "buffer":
+            # You (Netzer) absorb fees; client invests full amount
+            nav_units = gross_usdt
+        else:
+            # Client invests net of fees
+            nav_units = gross_usdt - trade_fee_usdt - withdrawal_fee_usdt
+
+        # --- Record fee data in Supabase ---
+        record = {
+            "client_id": cid,
+            "trade_fee": round(trade_fee_usdt, 6),
+            "withdrawal_fee": round(withdrawal_fee_usdt, 6),
+            "fund_model": model,
+        }
+
+        async with httpx.AsyncClient() as client:
+            await client.post(
+                f"{SUPABASE_URL}/rest/v1/fees",
+                headers={
+                    "apikey": SUPABASE_KEY,
+                    "Authorization": f"Bearer {SUPABASE_KEY}",
+                    "Content-Type": "application/json",
+                    "Prefer": "return=representation",
+                },
+                json=record,
+                timeout=20,
+            )
+
+        # --- Return NAV summary ---
+        return {
+            "ok": True,
+            "client_id": cid,
+            "fund_model": model,
+            "gross_usdt": round(gross_usdt, 6),
+            "nav_units": round(nav_units, 6),
+            "trade_fee_usdt": round(trade_fee_usdt, 6),
+            "withdrawal_fee_usdt": round(withdrawal_fee_usdt, 6),
+            "total_fees_usdt": round(trade_fee_usdt + withdrawal_fee_usdt, 6),
+        }
+
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
