@@ -292,3 +292,6 @@ async def calculate_nav(data: dict):
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
+from routes_valr_trade import router as trade_router
+app.include_router(trade_router)
+
